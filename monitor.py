@@ -11,31 +11,37 @@ WXPUSHER_UID = os.environ.get("WXPUSHER_UID")
 URL = "https://www.51kanong.com/yh-169-1.htm"
 
 def fetch_deals():
-    headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+    }
     try:
         res = requests.get(URL, headers=headers, timeout=10)
         res.encoding = 'utf-8'
-        soup = BeautifulSoup(res.text, 'html.parser')
+        print(f"网页请求状态码: {res.status_code}")
         
+        soup = BeautifulSoup(res.text, 'html.parser')
         deals = []
-        # 根据 51卡农 页面结构提取帖子标题和链接
-        for item in soup.select('.fl.ilist ul li, .post-list li, .comwidth ul li'):
-            a_tag = item.find('a')
-            if a_tag and a_tag.get('href'):
-                title = a_tag.get_text(strip=True)
-                link = a_tag.get('href')
-                if title and len(title) > 5:
-                    if not link.startswith('http'):
-                        link = "https://www.51kanong.com/" + link.lstrip('/')
-                    deals.append(f"标题: {title}\n链接: {link}")
-        return deals[:10] # 获取前 10 条最新线报
+        
+        # 换用更通用的方式：抓取页面上所有的 a 标签，只要标题长度合适就收集
+        for a_tag in soup.find_all('a'):
+            title = a_tag.get_text(strip=True)
+            link = a_tag.get('href')
+            if title and len(title) > 8:  # 过滤掉太短的导航字样
+                if link and not link.startswith('http'):
+                    link = "https://www.51kanong.com" + (link if link.startswith('/') else '/' + link)
+                deal_item = f"标题: {title}\n链接: {link}"
+                if deal_item not in deals:
+                    deals.append(deal_item)
+                    
+        print(f"成功抓取到链接数量: {len(deals)}")
+        return deals[:15] # 取前 15 条
     except Exception as e:
         print(f"抓取网页失败: {e}")
         return []
 
 def analyze_with_ai(deals):
     if not API_KEY or not deals:
-        return []
+        return "直接推送测试" # 如果没有配置 AI 密钥或者调试，直接把内容推过去测试
     
     client = OpenAI(
         api_key=API_KEY,
@@ -44,12 +50,10 @@ def analyze_with_ai(deals):
     
     text_content = "\n\n".join(deals)
     prompt = f"""
-    下面是 51卡农 网站上的最新线报列表，请帮我筛选出有价值的“羊毛”线报（如充值返利、漏洞、有效优惠、大额优惠券等）。
-    请过滤掉垃圾广告、无意义水贴。
-    对于筛选出的优质线报，请给出简短的推荐理由和精炼摘要。
-    如果全都没有价值，请直接回复“无”。
+    下面是 51卡农 网站上的最新抓取内容，请帮我筛选出有价值的“羊毛”线报（如返利、优惠券、活动等）。
+    如果里面有任何看起来像线报的内容，请提取并简单总结。如果全是无意义杂项，请直接回复“无”。
 
-    线报列表：
+    内容列表：
     {text_content}
     """
     
@@ -62,7 +66,8 @@ def analyze_with_ai(deals):
         return response.choices[0].message.content
     except Exception as e:
         print(f"AI 分析失败: {e}")
-        return None
+        # 如果 AI 报错，保底直接把抓到的第一条内容推出去验证
+        return deals[0] if deals else "无"
 
 def send_wxpusher(content):
     if not WXPUSHER_TOKEN or not WXPUSHER_UID or not content or content.strip() == "无":
@@ -72,7 +77,7 @@ def send_wxpusher(content):
     url = "https://wxpusher.zjiecode.com/api/send/message"
     payload = {
         "appToken": WXPUSHER_TOKEN,
-        "content": f"🐑 51卡农最新优质线报通知\n\n{content}",
+        "content": f"🐑 51卡农最新监控通知\n\n{content}",
         "summary": "51卡农羊毛线报",
         "contentType": 1,
         "uids": [WXPUSHER_UID]
@@ -87,12 +92,9 @@ if __name__ == "__main__":
     print("开始抓取 51卡农...")
     deals = fetch_deals()
     if deals:
-        print(f"成功抓取到 {len(deals)} 条线报，开始 AI 筛选...")
+        print("开始进行内容分析...")
         result = analyze_with_ai(deals)
-        if result and result.strip() != "无":
-            print("发现有效线报，准备发送微信推送...")
-            send_wxpusher(result)
-        else:
-            print("AI 筛选结果：暂无高价值羊毛。")
+        print(f"最终推送内容结果: {result}")
+        send_wxpusher(result)
     else:
         print("未抓取到内容。")
