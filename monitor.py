@@ -1,6 +1,8 @@
 import os
 import time
 import requests
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
 from bs4 import BeautifulSoup
 
 URL = "https://www.51kanong.com/yh-169-1.htm"
@@ -15,15 +17,21 @@ def fetch_deals():
         "Accept-Language": "zh-CN,zh;q=0.9"
     }
     
+    # 创建带自动重试机制的 Session，应对网络波动
     session = requests.Session()
+    retries = Retry(total=3, backoff_factor=1, status_forcelist=[500, 502, 503, 504])
+    session.mount('https://', HTTPAdapter(max_retries=retries))
+    session.mount('http://', HTTPAdapter(max_retries=retries))
+
     try:
-        res = session.get(URL, headers=headers, timeout=10)
+        # 将超时时间延长到 20 秒
+        res = session.get(URL, headers=headers, timeout=20)
         res.encoding = 'utf-8'
         
         if "reload()" in res.text:
             print("检测到防爬 JS 挑战，正在模拟浏览器二次请求...")
             time.sleep(1.5)
-            res = session.get(URL, headers=headers, timeout=10)
+            res = session.get(URL, headers=headers, timeout=20)
             res.encoding = 'utf-8'
 
         soup = BeautifulSoup(res.text, 'html.parser')
